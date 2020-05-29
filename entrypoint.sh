@@ -24,6 +24,10 @@ if [ -z "${SUBSPACE_NAMESERVER-}" ]; then
   export SUBSPACE_NAMESERVER="1.1.1.1"
 fi
 
+if [ -z "${SUBSPACE_DNS_RESOLVER-}" ]; then
+  export SUBSPACE_DNS_RESOLVER="DNSMASQ"
+fi
+
 if [ -z "${SUBSPACE_LETSENCRYPT-}" ]; then
   export SUBSPACE_LETSENCRYPT="true"
 fi
@@ -106,13 +110,15 @@ if ! /sbin/iptables -t nat --check OUTPUT -s ${SUBSPACE_IPV4_POOL} -p tcp --dpor
   /sbin/iptables -t nat --append OUTPUT -s ${SUBSPACE_IPV4_POOL} -p tcp --dport 53 -j DNAT --to ${SUBSPACE_IPV4_GW}:53
 fi
 
-# ipv6 - DNS Leak Protection
-if ! /sbin/ip6tables --wait -t nat --check OUTPUT -s ${SUBSPACE_IPV6_POOL} -p udp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}; then
-  /sbin/ip6tables --wait -t nat --append OUTPUT -s ${SUBSPACE_IPV6_POOL} -p udp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}
-fi
+if [[ ${SUBSPACE_IPV6_NAT_ENABLED-} -gt 0 ]]; then
+  # ipv6 - DNS Leak Protection
+  if ! /sbin/ip6tables --wait -t nat --check OUTPUT -s ${SUBSPACE_IPV6_POOL} -p udp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}; then
+    /sbin/ip6tables --wait -t nat --append OUTPUT -s ${SUBSPACE_IPV6_POOL} -p udp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}
+  fi
 
-if ! /sbin/ip6tables --wait -t nat --check OUTPUT -s ${SUBSPACE_IPV6_POOL} -p tcp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}; then
-  /sbin/ip6tables --wait -t nat --append OUTPUT -s ${SUBSPACE_IPV6_POOL} -p tcp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}
+  if ! /sbin/ip6tables --wait -t nat --check OUTPUT -s ${SUBSPACE_IPV6_POOL} -p tcp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}; then
+    /sbin/ip6tables --wait -t nat --append OUTPUT -s ${SUBSPACE_IPV6_POOL} -p tcp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}
+  fi
 fi
 #
 # WireGuard (${SUBSPACE_IPV4_POOL})
@@ -149,37 +155,72 @@ ip addr add ${SUBSPACE_IPV6_GW}/${SUBSPACE_IPV6_CIDR} dev wg0
 wg setconf wg0 /data/wireguard/server.conf
 ip link set wg0 up
 
-# dnsmasq service
-if ! test -d /etc/service/dnsmasq; then
-  cat <<DNSMASQ >/etc/dnsmasq.conf
-    # Only listen on necessary addresses.
-    listen-address=127.0.0.1,${SUBSPACE_IPV4_GW},${SUBSPACE_IPV6_GW}
+# dns service
+if [ "${SUBSPACE_DNS_RESOLVER}" == "DNSMASQ" ]; then
+  if ! test -d /etc/service/dnsmasq; then
+    cat <<DNSMASQ >/etc/dnsmasq.conf
+      # Only listen on necessary addresses.
+      listen-address=127.0.0.1,${SUBSPACE_IPV4_GW},${SUBSPACE_IPV6_GW}
 
-    # Never forward plain names (without a dot or domain part)
-    domain-needed
+      # Never forward plain names (without a dot or domain part)
+      domain-needed
 
-    # Never forward addresses in the non-routed address spaces.
-    bogus-priv
+      # Never forward addresses in the non-routed address spaces.
+      bogus-priv
 DNSMASQ
 
-  mkdir -p /etc/service/dnsmasq
-  cat <<RUNIT >/etc/service/dnsmasq/run
+    mkdir -p /etc/service/dnsmasq
+    cat <<RUNIT >/etc/service/dnsmasq/run
 #!/bin/sh
 exec /usr/sbin/dnsmasq --no-daemon
 RUNIT
-  chmod +x /etc/service/dnsmasq/run
+    chmod +x /etc/service/dnsmasq/run
 
-  # dnsmasq service log
-  mkdir -p /etc/service/dnsmasq/log
-  mkdir -p /etc/service/dnsmasq/log/main
-  cat <<RUNIT >/etc/service/dnsmasq/log/run
+    # dnsmasq service log
+    mkdir -p /etc/service/dnsmasq/log
+    mkdir -p /etc/service/dnsmasq/log/main
+    cat <<RUNIT >/etc/service/dnsmasq/log/run
 #!/bin/sh
 exec svlogd -tt ./main
 RUNIT
-  chmod +x /etc/service/dnsmasq/log/run
-  ln -s /etc/service/dnsmasq /etc/service/dnsmasq
+    chmod +x /etc/service/dnsmasq/log/run
+  fi
+
+elif [ "${SUBSPACE_DNS_RESOLVER}" == "CLOUDFLARED" ]; then
+
+  # Cloudflared
+  if [ -x /usr/local/bin/cloudflared ]; then
+      mkdir -p /etc/cloudflared
+      touch /etc/cloudflared/cert.pem
+      cat << CLOUDFLAREDCFG > /etc/cloudflared/config.yml
+proxy-dns: true
+address: ${SUBSPACE_IPV4_GW}
+proxy-dns-upstream:
+ - https://dns.google/dns-query
+ - https://1.1.1.1/dns-query
+ - https://1.0.0.1/dns-query
+CLOUDFLAREDCFG
+
+      mkdir -p /etc/service/cloudflared
+      cat <<RUNIT >/etc/service/cloudflared/run
+#!/bin/bash
+export TUNNEL_DNS_ADDRESS=${SUBSPACE_IPV4_GW}
+exec /usr/local/bin/cloudflared --config /etc/cloudflared/config.yml --origincert /etc/cloudflared/cert.pem --no-autoupdate proxy-dns --address ${SUBSPACE_IPV4_GW}
+RUNIT
+      chmod +x /etc/service/cloudflared/run
+
+      # cloudflared service log
+      mkdir -p /etc/service/cloudflared/log
+      mkdir -p /etc/service/cloudflared/log/main
+      cat <<RUNIT >/etc/service/cloudflared/log/run
+#!/bin/sh
+exec svlogd -tt ./main
+RUNIT
+      chmod +x /etc/service/cloudflared/log/run
 fi
 
+
+fi
 # subspace service
 if ! test -d /etc/service/subspace; then
   mkdir /etc/service/subspace
@@ -202,7 +243,6 @@ RUNIT
 exec svlogd -tt ./main
 RUNIT
   chmod +x /etc/service/subspace/log/run
-  ln -s /etc/service/subspace /etc/service/subspace
 fi
 
 exec $@
