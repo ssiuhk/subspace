@@ -147,6 +147,10 @@ docker create \
     --cap-add NET_ADMIN \
     --volume /data:/data \
     --env SUBSPACE_HTTP_HOST="subspace.example.com" \
+        # Optional variable to set Wireguard Endpoint to use IP instead of DNS name
+    --env SUBSPACE_ENDPOINT_USE_IP=1 \
+        # Optional variable to set Wireguard Endpoint IP instead of auto detection (not effective if SUBSPACE_ENDPOINT_USE_IP is not set)
+    --env SUBSPACE_ENDPOINT_IP="123.123.123.123" \
 	# Optional variable to change upstream DNS provider
     --env SUBSPACE_NAMESERVER="1.1.1.1" \
 	# Optional variable to change WireGuard Listenport
@@ -182,6 +186,8 @@ services:
    restart: always
    environment:
     - SUBSPACE_HTTP_HOST=subspace.example.org
+    - SUBSPACE_ENDPOINT_USE_IP=1
+    - SUBSPACE_ENDPOINT_IP="123.123.123.123"
     - SUBSPACE_LETSENCRYPT=true
     - SUBSPACE_HTTP_INSECURE=false
     - SUBSPACE_HTTP_ADDR=":80"

@@ -63,7 +63,7 @@ fi
 # Set DNS server
 echo "nameserver ${SUBSPACE_NAMESERVER}" >/etc/resolv.conf
 
-if [ -n "${SUBSPACE_DISABLE_MASQUERADE-}" ]; then
+if [ -z "${SUBSPACE_DISABLE_MASQUERADE-}" ]; then
   # IPv4
   if [ -x /sbin/iptables ]; then
     if ! /sbin/iptables -t nat --check POSTROUTING -s ${SUBSPACE_IPV4_POOL} -j MASQUERADE; then
@@ -120,6 +120,18 @@ if [[ ${SUBSPACE_IPV6_NAT_ENABLED-} -gt 0 ]]; then
     /sbin/ip6tables --wait -t nat --append OUTPUT -s ${SUBSPACE_IPV6_POOL} -p tcp --dport 53 -j DNAT --to ${SUBSPACE_IPV6_GW}
   fi
 fi
+
+# Enable IPv4 forwarding
+if [ $(/sbin/sysctl -n net.ipv4.ip_forward) -ne 1 ]; then
+  /sbin/sysctl -w net.ipv4.ip_forward=1
+fi
+
+if [[ ${SUBSPACE_IPV6_NAT_ENABLED-} -gt 0 ]]; then
+  if [ $(/sbin/sysctl -n net.ipv6.conf.all.forwarding) -ne 1 ]; then
+    /sbin/sysctl -w net.ipv6.conf.all.forwarding=1
+  fi
+fi
+
 #
 # WireGuard (${SUBSPACE_IPV4_POOL})
 #
@@ -131,6 +143,9 @@ if ! test -d /data/wireguard; then
   touch clients/null.conf # So you can cat *.conf safely
   mkdir peers
   touch peers/null.conf # So you can cat *.conf safely
+  mkdir preSharedKey
+  touch preSharedKey/null.psk
+  chmod 0700 clients peers preSharedKey
 
   # Generate public/private server keys.
   wg genkey | tee server.private | wg pubkey >server.public

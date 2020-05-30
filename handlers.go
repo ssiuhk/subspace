@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -402,6 +403,29 @@ func profileAddHandler(w *Web) {
 	if eh := getEnv("SUBSPACE_ENDPOINT_HOST", "nil"); eh != "nil" {
 		endpointHost = eh
 	}
+	if ep_use_ip := getEnv("SUBSPACE_ENDPOINT_USE_IP", "nil"); ep_use_ip != "nil" {
+		if ep_ip := getEnv("SUBSPACE_ENDPOINT_IP", "nil"); ep_ip != "nil" {
+			if net.ParseIP(ep_ip) != nil {
+				endpointHost = ep_ip
+			}
+		} else {
+			resp, err := http.Get("http://whatismyip.akamai.com")
+			if err != nil {
+				logger.Error(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				bodyBytes, err := ioutil.ReadAll(resp.Body)
+				if err != nil {
+					logger.Error(err)
+				}
+				bodyString := string(bodyBytes)
+				if net.ParseIP(bodyString) != nil {
+					endpointHost = bodyString
+				}
+			}
+		}
+	}
 	allowedips := "0.0.0.0/0, ::/0"
 	if ips := getEnv("SUBSPACE_ALLOWED_IPS", "nil"); ips != "nil" {
 		allowedips = ips
@@ -411,12 +435,15 @@ func profileAddHandler(w *Web) {
 cd {{$.Datadir}}/wireguard
 wg_private_key="$(wg genkey)"
 wg_public_key="$(echo $wg_private_key | wg pubkey)"
+wg_psk="$(wg genpsk)"
+echo "${wg_psk}" > preSharedKey/{{$.Profile.ID}}.psk
 
-wg set wg0 peer ${wg_public_key} allowed-ips {{$.IPv4Pref}}{{$.Profile.Number}}/32,{{$.IPv6Pref}}{{$.Profile.Number}}/128
+wg set wg0 peer ${wg_public_key} preshared-key preSharedKey/{{$.Profile.ID}}.psk allowed-ips {{$.IPv4Pref}}{{$.Profile.Number}}/32,{{$.IPv6Pref}}{{$.Profile.Number}}/128
 
 cat <<WGPEER >peers/{{$.Profile.ID}}.conf
 [Peer]
 PublicKey = ${wg_public_key}
+PresharedKey = ${wg_psk}
 AllowedIPs = {{$.IPv4Pref}}{{$.Profile.Number}}/32,{{$.IPv6Pref}}{{$.Profile.Number}}/128
 WGPEER
 
@@ -430,7 +457,9 @@ Address = {{$.IPv4Pref}}{{$.Profile.Number}}/{{$.IPv4Cidr}},{{$.IPv6Pref}}{{$.Pr
 PublicKey = $(cat server.public)
 
 Endpoint = {{$.EndpointHost}}:{{$.Listenport}}
+PresharedKey = ${wg_psk}
 AllowedIPs = {{$.AllowedIPS}}
+PersistentKeepalive = 25
 WGCLIENT
 `
 	_, err = bash(script, struct {
