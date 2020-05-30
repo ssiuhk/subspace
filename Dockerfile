@@ -25,6 +25,9 @@ LABEL maintainer="github.com/subspacecommunity/subspace"
 
 COPY --from=build  /src/subspace-linux-amd64 /usr/bin/subspace
 COPY bin/my_init /sbin/my_init
+COPY my_init.d/startup.d /etc/my_init.d
+COPY my_init.d/pre_shutdown.d /etc/my_init.pre_shutdown.d
+COPY my_init.d/post_shutdown.d /etc/my_init.post_shutdown.d
 
 ENV DEBIAN_FRONTEND noninteractive
 
