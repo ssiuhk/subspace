@@ -123,6 +123,8 @@ if ! test -d /data/wireguard; then
   touch clients/null.conf # So you can cat *.conf safely
   mkdir peers
   touch peers/null.conf # So you can cat *.conf safely
+  mkdir preSharedKey
+  touch preSharedKey/null.psk # So you can cat *.psk safely
 
   # Generate public/private server keys.
   wg genkey | tee server.private | wg pubkey > server.public

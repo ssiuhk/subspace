@@ -403,13 +403,16 @@ func profileAddHandler(w *Web) {
 cd {{$.Datadir}}/wireguard
 wg_private_key="$(wg genkey)"
 wg_public_key="$(echo $wg_private_key | wg pubkey)"
+wg_psk="$(wg genpsk)"
+echo "${wg_psk}" > preSharedKey/{{$.Profile.ID}}.psk
 
-wg set wg0 peer ${wg_public_key} allowed-ips {{$.IPv4Pref}}{{$.Profile.Number}}/32,{{$.IPv6Pref}}{{$.Profile.Number}}/128
+wg set wg0 peer ${wg_public_key} preshared-key preSharedKey/{{$.Profile.ID}}.psk allowed-ips {{$.IPv4Pref}}{{$.Profile.Number}}/32,{{$.IPv6Pref}}{{$.Profile.Number}}/128
 
 cat <<WGPEER >peers/{{$.Profile.ID}}.conf
 [Peer]
 PublicKey = ${wg_public_key}
 AllowedIPs = {{$.IPv4Pref}}{{$.Profile.Number}}/32,{{$.IPv6Pref}}{{$.Profile.Number}}/128
+PresharedKey = ${wg_psk}
 WGPEER
 
 cat <<WGCLIENT >clients/{{$.Profile.ID}}.conf
@@ -422,7 +425,9 @@ Address = {{$.IPv4Pref}}{{$.Profile.Number}}/{{$.IPv4Cidr}},{{$.IPv6Pref}}{{$.Pr
 PublicKey = $(cat server.public)
 
 Endpoint = {{$.EndpointHost}}:{{$.Listenport}}
+PresharedKey = ${wg_psk}
 AllowedIPs = {{$.AllowedIPS}}
+PersistentKeepalive = 25
 WGCLIENT
 `
 	_, err = bash(script, struct {
