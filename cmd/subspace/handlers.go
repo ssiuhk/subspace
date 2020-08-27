@@ -394,6 +394,23 @@ func profileAddHandler(w *Web) {
 	if eh := getEnv("SUBSPACE_ENDPOINT_HOST", "nil"); eh != "nil" {
 		endpointHost = eh
 	}
+	if ep_ip_auto_detect := getEnv("SUBSPACE_ENDPOINT_IP_AUTO_DETECT", "nil"); ep_ip_auto_detect != "nil" {
+                resp, err := http.Get("http://whatismyip.akamai.com")
+                if err != nil {
+                        logger.Error(err)
+                }
+                defer resp.Body.Close()
+                if resp.StatusCode == http.StatusOK {
+                        bodyBytes, err := ioutil.ReadAll(resp.Body)
+                        if err != nil {
+                                logger.Error(err)
+                        }
+                        bodyString := string(bodyBytes)
+                        if net.ParseIP(bodyString) != nil {
+                                endpointHost = bodyString
+                        }
+                }
+        }
 	allowedips := "0.0.0.0/0, ::/0"
 	if ips := getEnv("SUBSPACE_ALLOWED_IPS", "nil"); ips != "nil" {
 		allowedips = ips
