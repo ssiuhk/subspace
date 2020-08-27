@@ -208,4 +208,5 @@ RUNIT
   chmod +x /etc/service/subspace/log/run
 fi
 
+sleep 5
 exec $@
