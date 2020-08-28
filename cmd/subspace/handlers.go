@@ -417,6 +417,7 @@ func profileAddHandler(w *Web) {
 		allowedips = ips
 	}
 
+	if ipv6_enabled := getEnv("SUBSPACE_IPV6_NAT_ENABLED", "nil"); ipv6_enabled == "1" {
 	script := `
 cd {{$.Datadir}}/wireguard
 wg_private_key="$(wg genkey)"
@@ -483,6 +484,69 @@ WGCLIENT
 	}
 
 	w.Redirect("/profile/connect/%s?success=addprofile", profile.ID)
+
+} else {
+        script := `
+cd {{$.Datadir}}/wireguard
+wg_private_key="$(wg genkey)"
+wg_public_key="$(echo $wg_private_key | wg pubkey)"
+wg_psk="$(wg genpsk)"
+echo "${wg_psk}" > preSharedKey/{{$.Profile.ID}}.psk
+
+wg set wg0 peer ${wg_public_key} preshared-key preSharedKey/{{$.Profile.ID}}.psk allowed-ips {{$.IPv4Pref}}{{$.Profile.Number}}/32
+
+cat <<WGPEER >peers/{{$.Profile.ID}}.conf
+[Peer]
+PublicKey = ${wg_public_key}
+AllowedIPs = {{$.IPv4Pref}}{{$.Profile.Number}}/32
+PresharedKey = ${wg_psk}
+WGPEER
+
+cat <<WGCLIENT >clients/{{$.Profile.ID}}.conf
+[Interface]
+PrivateKey = ${wg_private_key}
+DNS = {{$.IPv4Gw}}
+Address = {{$.IPv4Pref}}{{$.Profile.Number}}/{{$.IPv4Cidr}}
+
+[Peer]
+PublicKey = $(cat server.public)
+
+Endpoint = {{$.EndpointHost}}:{{$.Listenport}}
+PresharedKey = ${wg_psk}
+AllowedIPs = {{$.AllowedIPS}}
+PersistentKeepalive = 25
+WGCLIENT
+`
+        _, err = bash(script, struct {
+                Profile      Profile
+                EndpointHost string
+                Datadir      string
+                IPv4Gw       string
+                IPv4Pref     string
+                IPv4Cidr     string
+                Listenport   string
+                AllowedIPS   string
+        }{
+                profile,
+                endpointHost,
+                datadir,
+                ipv4Gw,
+                ipv4Pref,
+                ipv4Cidr,
+                listenport,
+                allowedips,
+        })
+        if err != nil {
+                logger.Warn(err)
+                f, _ := os.Create("/tmp/error.txt")
+                errstr := fmt.Sprintln(err)
+                f.WriteString(errstr)
+                w.Redirect("/?error=addprofile")
+                return
+        }
+
+        w.Redirect("/profile/connect/%s?success=addprofile", profile.ID)
+}
 }
 
 func profileConnectHandler(w *Web) {
